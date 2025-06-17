@@ -2,3 +2,7 @@
   pip install -r requirements_ngrok.txt
   export NGROK_AUTHTOKEN=your_auth_token
   python ngrok_server.py
+
+
+uvicorn api:app --host 0.0.0.0 --port 8000
+    ngrok http 8000

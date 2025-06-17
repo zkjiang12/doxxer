@@ -83,7 +83,9 @@ async def analyze_image(file: UploadFile = File(...)):
         if match:
             metadata = match["metadata"]
             name = metadata.get("name", "Unknown")
-            description = f"Confidence: {match['score']:.2f}"
+            person_description = metadata.get("description", "")
+            confidence = f"Confidence: {match['score']:.2f}"
+            description = f"{person_description}\n{confidence}" if person_description else confidence
             
             # Get image URL from Pinecone metadata instead of using face crop
             thumbnail_url = metadata.get("img_url", "")
@@ -100,6 +102,7 @@ async def analyze_image(file: UploadFile = File(...)):
                 name=name,
                 thumbnailUrl=thumbnail_url,
                 description=description,
+                confidence=confidence,
                 faceBox=face_box
             )
             
