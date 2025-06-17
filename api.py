@@ -23,7 +23,7 @@ app.add_middleware(
 
 # ---- Init Pinecone ---- #
 pc = Pinecone(api_key="pcsk_4Larmy_EmaoUbmwSGpwH8ree9h8zKP8kAZyhvAQGbViTtjergsFXQPdoYjV4KJGuGiYPhU")
-index = pc.Index("face-recognition")
+index = pc.Index("doxxer")
 
 # ---- Init InsightFace ---- #
 face_analyzer = FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
