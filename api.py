@@ -85,11 +85,15 @@ async def analyze_image(file: UploadFile = File(...)):
             name = metadata.get("name", "Unknown")
             description = f"Confidence: {match['score']:.2f}"
             
-            # Create a thumbnail from the face region
-            face_img = img[y1:y2, x1:x2]
-            _, buffer = cv2.imencode('.jpg', face_img)
-            thumbnail_b64 = base64.b64encode(buffer).decode('utf-8')
-            thumbnail_url = f"data:image/jpeg;base64,{thumbnail_b64}"
+            # Get image URL from Pinecone metadata instead of using face crop
+            thumbnail_url = metadata.get("img_url", "")
+            
+            # If no image URL in metadata, fallback to face crop
+            if not thumbnail_url:
+                face_img = img[y1:y2, x1:x2]
+                _, buffer = cv2.imencode('.jpg', face_img)
+                thumbnail_b64 = base64.b64encode(buffer).decode('utf-8')
+                thumbnail_url = f"data:image/jpeg;base64,{thumbnail_b64}"
             
             profile = Profile(
                 id=str(uuid.uuid4()),
