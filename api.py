@@ -1,11 +1,11 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import numpy as np
 from insightface.app import FaceAnalysis
 from pinecone import Pinecone
 import base64
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 import uuid
 import io
@@ -35,6 +35,10 @@ class Profile(BaseModel):
     thumbnailUrl: str
     description: str
     faceBox: dict  # { top: string, left: string, width: string, height: string }
+    
+class UserRegistration(BaseModel):
+    name: str
+    description: str
 
 @app.post("/analyze", response_model=List[Profile])
 async def analyze_image(file: UploadFile = File(...)):
@@ -78,9 +82,10 @@ async def analyze_image(file: UploadFile = File(...)):
         )
         
         # Get match information
-        match = results.get("matches", [])[0] if results.get("matches", []) else None
+        matches = results.get("matches", [])
+        match = matches[0] if matches else None
         
-        if match:
+        if match and match["score"] > 0.38:
             metadata = match["metadata"]
             name = metadata.get("name", "Unknown")
             person_description = metadata.get("description", "")
@@ -102,13 +107,116 @@ async def analyze_image(file: UploadFile = File(...)):
                 name=name,
                 thumbnailUrl=thumbnail_url,
                 description=description,
-                confidence=confidence,
+                faceBox=face_box
+            )
+            
+            profiles.append(profile)
+        else:
+            # No match or match below threshold
+            # Create thumbnail from face crop
+            # Make sure coordinates are valid
+            x1 = max(0, x1)
+            y1 = max(0, y1)
+            x2 = min(img_width, x2)
+            y2 = min(img_height, y2)
+            
+            # Check if we have a valid face crop
+            if x1 < x2 and y1 < y2:
+                face_img = img[y1:y2, x1:x2]
+                _, buffer = cv2.imencode('.jpg', face_img)
+                thumbnail_b64 = base64.b64encode(buffer).decode('utf-8')
+                thumbnail_url = f"data:image/jpeg;base64,{thumbnail_b64}"
+            else:
+                # If invalid crop, use a placeholder or the full image
+                thumbnail_url = ""
+            
+            profile = Profile(
+                id=str(uuid.uuid4()),
+                name="RIP no match",
+                thumbnailUrl=thumbnail_url,
+                description="Confidence too low or no match found",
                 faceBox=face_box
             )
             
             profiles.append(profile)
     
     return profiles
+
+@app.post("/register")
+async def register_user(
+    file: UploadFile = File(...),
+    name: str = Form(...),
+    description: str = Form(...)
+):
+    # Read image from uploaded file
+    contents = await file.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
+    if img is None:
+        raise HTTPException(status_code=400, detail="Invalid image data")
+    
+    # Detect faces
+    faces = face_analyzer.get(img)
+    
+    if not faces:
+        raise HTTPException(status_code=400, detail="No face detected in the image")
+    
+    if len(faces) > 1:
+        raise HTTPException(status_code=400, detail="Multiple faces detected. Please upload an image with only one face.")
+    
+    # Get the detected face
+    face = faces[0]
+    
+    # Extract embedding
+    embedding = face.normed_embedding.tolist()
+    
+    # Create a thumbnail from the face
+    box = face.bbox.astype(int)
+    x1, y1, x2, y2 = box
+    
+    # Make sure coordinates are valid
+    img_height, img_width = img.shape[:2]
+    x1 = max(0, x1)
+    y1 = max(0, y1)
+    x2 = min(img_width, x2)
+    y2 = min(img_height, y2)
+    
+    # Check if we have a valid face crop
+    if x1 >= x2 or y1 >= y2:
+        raise HTTPException(status_code=400, detail="Invalid face detection")
+    
+    # Create face image
+    face_img = img[y1:y2, x1:x2]
+    _, buffer = cv2.imencode('.jpg', face_img)
+    img_b64 = base64.b64encode(buffer).decode('utf-8')
+    img_url = f"data:image/jpeg;base64,{img_b64}"
+    
+    # Create unique ID
+    user_id = str(uuid.uuid4())
+    
+    # Store in Pinecone
+    index.upsert(
+        vectors=[
+            {
+                "id": user_id,
+                "values": embedding,
+                "metadata": {
+                    "name": name,
+                    "description": description,
+                    "img_url": img_url
+                }
+            }
+        ]
+    )
+    
+    return {
+        "id": user_id,
+        "name": name,
+        "description": description,
+        "img_url": img_url,
+        "message": "User registered successfully"
+    }
 
 if __name__ == "__main__":
     import uvicorn
